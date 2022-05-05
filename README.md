@@ -8,3 +8,4 @@ folders from the course:
 * stereo_data
 * stereo_data_add
 
+cmake -DOPENCV_ENABLE_NONFREE:BOOL=ON WITH_GTK=ON -DOPENCV_EXTRA_MODULES_PATH=../opencv_contrib-4.x/modules ../opencv-4.x
