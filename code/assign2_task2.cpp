@@ -96,7 +96,7 @@ static void drawEpipolarLines(const std::string& title, const cv::Matx<T1,3,3> F
   cv::waitKey();
 }
 
-void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,string name1,string name2,bool isorb=false){
+void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,string name1,string name2,bool isorb=false,bool isrightleft=true){
 
     std::vector<KeyPoint> keypoints1, keypoints2;
     Mat descriptors1, descriptors2;
@@ -125,7 +125,7 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
     drawMatches( img1, keypoints1, img2, keypoints2, good_matches, img_matches, Scalar::all(-1),
                  Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
     imwrite(name,img_matches);
-    
+
     //-- Show detected matches
     // imshow("Good Matches", img_matches );
     // waitKey();
@@ -133,14 +133,14 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
     drawKeypoints(img1,keypoints1,img_keypoints1);
     // imshow("features1",img_keypoints1);
     // waitKey();
-    imwrite(name1,img_keypoints1);
+//    imwrite(name1,img_keypoints1);
 
 
     Mat img_keypoints2;
     drawKeypoints(img2,keypoints2,img_keypoints2);
     // imshow("features2",img_keypoints2);
     // waitKey();
-    imwrite(name2,img_keypoints2);
+//    imwrite(name2,img_keypoints2);
 
     std::shuffle(good_matches.begin(), good_matches.end(), std::mt19937(std::random_device()()));
 
@@ -163,12 +163,38 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
     }
 
 
+    float data[] = {9.842439e+02, 0.000000e+00, 6.900000e+02, 0.000000e+00, 9.808141e+02, 2.331966e+02, 0.000000e+00, 0.000000e+00, 1.000000e+00};
+    Mat K_left = Mat(3,3,CV_32F,data);
+    Matx<float,3,3> K_mtx;
+    K_left.copyTo(K_mtx);
+    float data2[] = {9.895267e+02, 0.000000e+00, 7.020000e+02, 0.000000e+00, 9.878386e+02, 2.455590e+02, 0.000000e+00, 0.000000e+00, 1.000000e+00};
+    Mat K_right = Mat(3,3,CV_32F,data2);
 
-    Matx<float, 3, 3> f = findFundamentalMat(points1, points2, RANSAC);
+    vector<Point2f> points1_norm, points2_norm;
+    undistortPoints(points1, points1_norm, K_left,noArray());
+    if(isrightleft){
+        undistortPoints(points2, points2_norm, K_right,noArray());
+    }else{
+        undistortPoints(points2, points2_norm, K_left,noArray());
+    }
 
-    drawEpipolarLines("test", f, img1, img2, points1, points2);
-    // Mat lines;
-    // computeCorrespondEpilines(points1, 1, f, lines);
+    Matx<float, 3, 3> E = findEssentialMat(points1_norm,points2_norm,K_left);
+    Matx<float, 3,3> K_t,K_inv;
+    transpose(K_mtx,K_t);
+    invert(K_mtx,K_inv);
+    Matx<float, 3,3> f_fromExentialMat = K_t*E*K_inv;
+
+    Matx<float, 3, 3> f_8point = findFundamentalMat(points1, points2, FM_8POINT);
+    Matx<float, 3, 3> f_8pointRansac = findFundamentalMat(points1, points2, FM_RANSAC);
+
+
+    Mat lineimage;
+    cvtColor(img1,lineimage,COLOR_GRAY2BGR);
+    drawEpipolarLines("8 POINT", f_8point, img1, img2, points1, points2);
+    drawEpipolarLines("FM RANSAC", f_8pointRansac, img1, img2, points1, points2);
+    drawEpipolarLines("RANSAC", f_fromExentialMat, img1, img2,  points1, points2);
+
+
 }
 
 int main( int argc, char* argv[] )
@@ -191,8 +217,8 @@ int main( int argc, char* argv[] )
     int minHessian = 10000;
 
     Ptr<SURF> detector = SURF::create( minHessian );
-    compute_detection(img1,img2,detector,"SURF-left-left.png","SURF-left08.png","SURF-left10.png");
-    compute_detection(img1,img3,detector,"SURF-left-right.png","SURF-left08.png","SURF-right08.png");
+    compute_detection(img1,img2,detector,"SURF-left-left.png","SURF-left08.png","SURF-left10.png",false,false);
+    compute_detection(img1,img3,detector,"SURF-left-right.png","SURF-left08.png","SURF-right08.pn+g");
     
 
     //--------------------------------------------------------------------------------------------
@@ -207,9 +233,9 @@ int main( int argc, char* argv[] )
     // // ORB
     // //--------------------------------------------------------------------------------------------
 
-    // Ptr<ORB> detector_orb = ORB::create();
-    // compute_detection(img1,img2,detector_orb,"orb-left-left.png","orb-left08.png","orb-left10.png",true);
-    // compute_detection(img1,img3,detector_orb,"orb-left-right.png","orb-left08.png","orb-right08.png",true);
+    Ptr<ORB> detector_orb = ORB::create();
+    compute_detection(img1,img2,detector_orb,"orb-left-left.png","orb-left08.png","orb-left10.png",true,false);
+    compute_detection(img1,img3,detector_orb,"orb-left-right.png","orb-left08.png","orb-right08.png",true);
 
     return 0;
 }
