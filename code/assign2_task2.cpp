@@ -32,7 +32,7 @@ static float distancePointLine(const cv::Point_<T> point, const cv::Vec<T,3>& li
 }
 
 template <typename T1, typename T2>
-static void drawEpipolarLines(const std::string& title, const cv::Matx<T1,3,3> F,
+static void drawEpipolarLines(const std::string title, const cv::Matx<T1,3,3> F,
                 const cv::Mat& img1, const cv::Mat& img2,
                 const std::vector<cv::Point_<T2>> points1,
                 const std::vector<cv::Point_<T2>> points2,
@@ -94,18 +94,28 @@ static void drawEpipolarLines(const std::string& title, const cv::Matx<T1,3,3> F
   }
   cv::imshow(title, outImg);
   cv::waitKey();
+  cv::imwrite(title,outImg);
 }
 
-void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,string name1,string name2,bool isorb=false,bool isrightleft=true){
+void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name, string is_type,bool isrightleft){
 
     std::vector<KeyPoint> keypoints1, keypoints2;
     Mat descriptors1, descriptors2;
-    detector->detectAndCompute( img1, noArray(), keypoints1, descriptors1 );
-    detector->detectAndCompute( img2, noArray(), keypoints2, descriptors2 );
+    if(is_type == "fnb"){
+        detector->detect(img1, keypoints1);
+        detector->detect(img2, keypoints2);
+
+        Ptr<DescriptorExtractor> featureExtractor = BriefDescriptorExtractor::create();
+        featureExtractor->compute(img1, keypoints1, descriptors1);
+        featureExtractor->compute(img2, keypoints2, descriptors2);
+    } else {
+        detector->detectAndCompute( img1, noArray(), keypoints1, descriptors1 );
+        detector->detectAndCompute( img2, noArray(), keypoints2, descriptors2 );
+    }
     //-- Step 2: Matching descriptor vectors with a FLANN based matcher
     // Since SURF is a floating-point descriptor NORM_L2 is used
     Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create(DescriptorMatcher::FLANNBASED);
-    if(isorb){
+    if(is_type == "orb" || "fnb") {
         matcher = DescriptorMatcher::create(DescriptorMatcher::BRUTEFORCE);
     }
     std::vector< std::vector<DMatch> > knn_matches;
@@ -124,23 +134,14 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
     Mat img_matches;
     drawMatches( img1, keypoints1, img2, keypoints2, good_matches, img_matches, Scalar::all(-1),
                  Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
-    imwrite(name,img_matches);
+    //imwrite(name,img_matches);
 
-    //-- Show detected matches
-    // imshow("Good Matches", img_matches );
-    // waitKey();
     Mat img_keypoints1;
     drawKeypoints(img1,keypoints1,img_keypoints1);
-    // imshow("features1",img_keypoints1);
-    // waitKey();
-//    imwrite(name1,img_keypoints1);
 
 
     Mat img_keypoints2;
     drawKeypoints(img2,keypoints2,img_keypoints2);
-    // imshow("features2",img_keypoints2);
-    // waitKey();
-//    imwrite(name2,img_keypoints2);
 
     std::shuffle(good_matches.begin(), good_matches.end(), std::mt19937(std::random_device()()));
 
@@ -165,8 +166,7 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
 
     float data[] = {9.842439e+02, 0.000000e+00, 6.900000e+02, 0.000000e+00, 9.808141e+02, 2.331966e+02, 0.000000e+00, 0.000000e+00, 1.000000e+00};
     Mat K_left = Mat(3,3,CV_32F,data);
-    Matx<float,3,3> K_mtx;
-    K_left.copyTo(K_mtx);
+
     float data2[] = {9.895267e+02, 0.000000e+00, 7.020000e+02, 0.000000e+00, 9.878386e+02, 2.455590e+02, 0.000000e+00, 0.000000e+00, 1.000000e+00};
     Mat K_right = Mat(3,3,CV_32F,data2);
 
@@ -178,21 +178,30 @@ void compute_detection(Mat img1, Mat img2, Ptr<Feature2D> detector,string name,s
         undistortPoints(points2, points2_norm, K_left,noArray());
     }
 
-    Matx<float, 3, 3> E = findEssentialMat(points1_norm,points2_norm,K_left);
-    Matx<float, 3,3> K_t,K_inv;
-    transpose(K_mtx,K_t);
-    invert(K_mtx,K_inv);
-    Matx<float, 3,3> f_fromExentialMat = K_t*E*K_inv;
+    Matx<float, 3, 3> E = findEssentialMat(points1_norm,points2_norm,Matx33f::eye());
+    Matx<float, 3,3> K_inv_t_second,K_inv_left;
 
+    Matx<float, 3,3> f_fromExentialMat;
+    if(isrightleft){
+        invert(K_right, K_inv_t_second);
+        transpose(K_inv_t_second, K_inv_t_second);
+        invert(K_left,K_inv_left);
+        f_fromExentialMat = K_inv_t_second * E * K_inv_left;
+    }else{
+        invert(K_left, K_inv_t_second);
+        transpose(K_inv_t_second, K_inv_t_second);
+        invert(K_left,K_inv_left);
+        f_fromExentialMat = K_inv_t_second * E * K_inv_left;
+    }
     Matx<float, 3, 3> f_8point = findFundamentalMat(points1, points2, FM_8POINT);
     Matx<float, 3, 3> f_8pointRansac = findFundamentalMat(points1, points2, FM_RANSAC);
 
 
     Mat lineimage;
     cvtColor(img1,lineimage,COLOR_GRAY2BGR);
-    drawEpipolarLines("8 POINT", f_8point, img1, img2, points1, points2);
-    drawEpipolarLines("FM RANSAC", f_8pointRansac, img1, img2, points1, points2);
-    drawEpipolarLines("RANSAC", f_fromExentialMat, img1, img2,  points1, points2);
+    drawEpipolarLines(name + "fm-8point.png", f_8point, img1, img2, points1, points2);
+    drawEpipolarLines(name + "fm-ransac.png", f_8pointRansac, img1, img2, points1, points2);
+    drawEpipolarLines(name + "em-ransac.png", f_fromExentialMat, img1, img2,  points1, points2);
 
 
 }
@@ -210,32 +219,39 @@ int main( int argc, char* argv[] )
         parser.printMessage();
         return -1;
     }
-   
+
     //--------------------------------------------------------------------------------------------
     // SURF
     //--------------------------------------------------------------------------------------------
     int minHessian = 10000;
 
     Ptr<SURF> detector = SURF::create( minHessian );
-    compute_detection(img1,img2,detector,"SURF-left-left.png","SURF-left08.png","SURF-left10.png",false,false);
-    compute_detection(img1,img3,detector,"SURF-left-right.png","SURF-left08.png","SURF-right08.pn+g");
-    
+    compute_detection(img1, img2,detector,"SURF-left-left-", "", false);
+    compute_detection(img1,img3,detector,"SURF-left-right-", "", true);
 
     //--------------------------------------------------------------------------------------------
     // SIFT
     //--------------------------------------------------------------------------------------------
 
-    // Ptr<SIFT> detector_sift = SIFT::create(200);
-    // compute_detection(img1,img2,detector_sift,"SIFT-left-left.png","SIFT-left08.png","SIFT-left10.png");
-    // compute_detection(img1,img3,detector_sift,"SIFT-left-right.png","SIFT-left08.png","SIFT-right08.png");
+    Ptr<SIFT> detector_sift = SIFT::create(200);
+    compute_detection(img1, img2,detector_sift,"SIFT-left-left-", "", false);
+    compute_detection(img1,img3,detector_sift,"SIFT-left-right-", "", true);
 
-    // //--------------------------------------------------------------------------------------------
-    // // ORB
-    // //--------------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------------------------
+    // ORB
+    //--------------------------------------------------------------------------------------------
 
     Ptr<ORB> detector_orb = ORB::create();
-    compute_detection(img1,img2,detector_orb,"orb-left-left.png","orb-left08.png","orb-left10.png",true,false);
-    compute_detection(img1,img3,detector_orb,"orb-left-right.png","orb-left08.png","orb-right08.png",true);
+    compute_detection(img1, img2,detector_orb,"orb-left-left-", "orb", false);
+    compute_detection(img1,img3,detector_orb,"orb-left-right-","orb", true);
+
+    //--------------------------------------------------------------------------------------------
+    // Fast & Brief
+    //--------------------------------------------------------------------------------------------
+
+    Ptr<FastFeatureDetector> detector_fast = FastFeatureDetector::create(100);
+    compute_detection(img1, img2,detector_fast,"f&b-left-left-", "fnb", false);
+    compute_detection(img1,img3,detector_fast,"f&b-left-right-", "fnb", true);
 
     return 0;
 }
